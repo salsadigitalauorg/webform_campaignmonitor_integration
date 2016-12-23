@@ -1,0 +1,9 @@
+name: Webform Campaign Monitor Integration
+description: 'Allows to send Webform submissions to Campaign Monitor list.'
+package: Webform
+type: module
+version: 1.0
+core: 8.x
+dependencies:
+  - campaignmonitor
+  - webform
