@@ -66,7 +66,7 @@ class WebformCampaignMonitorHandler extends WebformHandlerBase {
     }
     return [
       '#theme' => 'markup',
-      '#markup' => $this->t('<strong>List: </strong> !list_name', ['!list_name' => $selectedList]),
+      '#markup' => $this->t('<strong>List: </strong> @list_name', ['@list_name' => $selectedList]),
     ];
   }
 
@@ -78,6 +78,7 @@ class WebformCampaignMonitorHandler extends WebformHandlerBase {
       'list' => '',
       'email' => '',
       'fullname' => '',
+      'mapping' => [],
     ];
   }
 
@@ -97,11 +98,16 @@ class WebformCampaignMonitorHandler extends WebformHandlerBase {
       '#type' => 'select',
       '#title' => $this->t('List'),
       '#required' => TRUE,
-      '#default_value' => $this->configuration['list'],
+      '#default_value' => $form_state->getValue('list') ?: $this->configuration['list'],
       '#options' => $options,
+      '#ajax' => [
+        // 'callback' => ['::listChangeCallback'],
+        // 'wrapper' => 'webform-campaignmonitor-mapping',
+      ],
     ];
 
     $fields = $this->getWebform()->getElementsFlattenedAndHasValue();
+
     $options = array();
     $options[''] = $this->t('- Select an email field -');
     foreach ($fields as $field_name => $field) {
@@ -114,7 +120,7 @@ class WebformCampaignMonitorHandler extends WebformHandlerBase {
       '#type' => 'select',
       '#title' => $this->t('Email field'),
       '#required' => TRUE,
-      '#default_value' => $this->configuration['email'],
+      '#default_value' => $form_state->getValue('email') ?: $this->configuration['email'],
       '#options' => $options,
     ];
 
@@ -130,11 +136,50 @@ class WebformCampaignMonitorHandler extends WebformHandlerBase {
       '#type' => 'select',
       '#title' => $this->t('Full name field'),
       '#required' => FALSE,
-      '#default_value' => $this->configuration['fullname'],
+      '#default_value' => $form_state->getValue('fullname') ?: $this->configuration['fullname'],
       '#options' => $options,
     ];
 
+    $form['mapping'] = [
+      '#type' => 'details',
+      '#title' => $this->t('Custom fields'),
+      '#open' => TRUE,
+      '#attributes' => ['id' => 'webform-campaignmonitor-mapping'],
+    ];
+
+    $list_id = $form_state->getValue('list') ?: ($form_state->getValue(['settings', 'list']) ?: $this->configuration['list']);
+    if (!empty($list_id)) {
+      $options = array();
+      $options[''] = $this->t('- Select a field -');
+      foreach ($fields as $field_name => $field) {
+        $options[$field_name] = $field['#title'] ?: '[' . $field_name . ']';
+      }
+
+      $customFields = $this->campaignMonitor->getCustomFields($list_id);
+      foreach ($customFields as $key => $customField) {
+        $key = str_replace(array('[', ']'), '', strtolower($key));
+        $autoMapping = isset($options[$key]) ? $key : '';
+        $defaultMapping = $form_state->getValue(['mapping', $key]);
+        if (!$defaultMapping) {
+          $defaultMapping = $this->configuration['mapping'][$key];
+          if (!$defaultMapping) {
+            $defaultMapping = $autoMapping;
+          }
+        }
+        $form['mapping'][$key] = [
+          '#type' => 'select',
+          '#title' => $customField['FieldName'] . ' (' . $customField['Key'] . ')',
+          '#options' => $options,
+          '#default_value' => $defaultMapping,
+        ];
+      }
+    }
+
     return $form;
+  }
+
+  public function listChangeCallback(array &$form, FormStateInterface $form_state) {
+    return isset($form['mapping']) ? $form['mapping'] : $form['settings']['mapping'];
   }
 
   /**
@@ -160,7 +205,10 @@ class WebformCampaignMonitorHandler extends WebformHandlerBase {
       $fields = $webform_submission->toArray(TRUE);
       $sendFields = array();
       foreach ($fields['data'] as $field_name => $field_value) {
-        $sendFields[] = (object) [
+        if (in_array($field_name, $this->configuration['mapping'])) {
+          $field_name = array_search($field_name, $this->configuration['mapping']);
+        }
+        $sendFields[] = [
           'Key' => $field_name,
           'Value' => $field_value,
         ];
